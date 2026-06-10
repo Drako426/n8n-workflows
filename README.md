@@ -1,6 +1,3 @@
-# n8n-workflows
-Flujos de n8n (auto-alojado) para automatización con IA — WhatsApp, agentes con herramientas, RAG y extracción de datos. Importa y conecta tus credenciales.
-
 # n8n Workflows
 
 Colección de flujos de automatización con **n8n** (instancia auto‑alojada). Cada archivo `.json` es una **plantilla lista para importar**: no contiene credenciales ni datos personales, solo marcadores (`YOUR_...`) que cada quien reemplaza con los suyos.
