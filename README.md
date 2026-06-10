@@ -30,4 +30,4 @@ Colección de flujos de automatización con **n8n** (instancia auto‑alojada). 
 
 ## Licencia
 
-MIT (ajústala a tu preferencia).
+MIT.
