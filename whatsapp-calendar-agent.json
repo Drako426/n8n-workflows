@@ -1,0 +1,992 @@
+{
+  "name": "WhatsApp Calendar Agent (text, voice & image)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "auto-calendario",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        41584,
+        10336
+      ],
+      "id": "b229530d-4bc9-4218-a8b0-6b1a5a7392de",
+      "name": "Recepcion de Mensaje (WhatsApp)",
+      "webhookId": "auto-calendario-whatsapp"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "verify-token",
+              "leftValue": "={{ $json.query['hub.verify_token'] }}",
+              "rightValue": "YOUR_VERIFY_TOKEN",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        41776,
+        10336
+      ],
+      "id": "578f48fb-184b-4d20-ba5e-09a236b448a7",
+      "name": "If Verify Token"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query[\"hub.challenge\"] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        41968,
+        10224
+      ],
+      "id": "d66b4fb2-af08-4ede-93fa-27e89328927d",
+      "name": "Responder Verificacion"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "YOUR_WHATSAPP_PHONE_NUMBER_ID",
+        "recipientPhoneNumber": "YOUR_RECIPIENT_PHONE_NUMBER",
+        "textBody": "Estoy procesando la informacion...",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        42176,
+        10464
+      ],
+      "id": "4359d592-7ddc-476c-b077-1c59877e12cd",
+      "name": "Respuesta Basica",
+      "webhookId": "6994a497-dd8b-4aca-9062-90e7aaa64abe"
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].audio.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        42832,
+        10272
+      ],
+      "id": "5829727f-af6c-45a0-8351-e9349c06414a",
+      "name": "Obtener audio (metadata)"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        43056,
+        10272
+      ],
+      "id": "da7a33f8-3b83-4dc5-8b92-98af17d1fded",
+      "name": "Descargar audio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        43280,
+        10272
+      ],
+      "id": "a96fe64a-1fba-426b-9aa3-d5383b718005",
+      "name": "Transcribir audio (Groq)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "text",
+              "name": "text",
+              "value": "={{ $json.text || $json.transcription || $json.response }}",
+              "type": "string"
+            },
+            {
+              "id": "sessionId",
+              "name": "sessionId",
+              "value": "={{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].from }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        43504,
+        10272
+      ],
+      "id": "a1d5ac13-6ffd-4c8f-806d-fa9082f4f557",
+      "name": "Contenido Voz"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "text",
+              "name": "text",
+              "value": "={{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].text.body }}",
+              "type": "string"
+            },
+            {
+              "id": "sessionId",
+              "name": "sessionId",
+              "value": "={{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].from }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        42832,
+        10464
+      ],
+      "id": "f21a20bc-d9fe-4ec1-bef5-08efeb9e7c19",
+      "name": "Contenido Escrito"
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].image.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        42832,
+        10752
+      ],
+      "id": "414c0e4e-3616-4e83-a2dc-c190fea11d90",
+      "name": "Obtener imagen (metadata)"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        43008,
+        10752
+      ],
+      "id": "d88a0a8a-222d-4ae3-9e28-28bda86ffa5c",
+      "name": "Descargar imagen"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"meta-llama/llama-4-scout-17b-16e-instruct\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres un asistente llamado Rayo que interpreta mensajes recibidos por WhatsApp para gestionar citas en Google Calendar. Analiza la imagen y extrae eventos con dia y hora si aparecen. Devuelve solo texto claro con los eventos.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Describe la imagen y extrae eventos\"\n        },\n        {\n          \"type\": \"image_url\",\n          \"image_url\": {\n            \"url\": \"{{ 'data:image/jpeg;base64,' + $json.image_base64 }}\"\n          }\n        }\n      ]\n    }\n  ]\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        43376,
+        10752
+      ],
+      "id": "0c9a8302-ccca-4742-b40e-8c51ab189379",
+      "name": "Analizar imagen (Groq)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "text",
+              "name": "text",
+              "value": "={{ $json.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "sessionId",
+              "name": "sessionId",
+              "value": "={{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].from }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        43552,
+        10752
+      ],
+      "id": "0c8d8343-86f4-4f46-86f9-ab6137a2a96d",
+      "name": "Contenido Imagen"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "=Eres Rayo, asistente para gestionar citas en Google Calendar por WhatsApp. Hoy es {{ $now }}. Zona horaria: America/Bogota (UTC-5).\n\nHerramientas disponibles (usa exactamente estos nombres):\n- Agendar, Reprogramar, cancelar_evento, Consultar.\n\nReglas:\n- Si el usuario da t?tulo, fecha y hora: ejecuta la herramienta sin preguntar m?s.\n- Si cancelar/reprogramar y no hay Event ID: usa Consultar en ese mismo turno, luego cancela/reprograma.\n- Nunca muestres JSON, IDs ni texto de herramientas.\n- Si Consultar no devuelve eventos: \"No tienes citas agendadas en ese rango.\"\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        44048,
+        10464
+      ],
+      "id": "8b1276bd-5b40-4dc8-9d41-26acf6fe8dc3",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "llama-3.1-8b-instant"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        43728,
+        10656
+      ],
+      "id": "c232244d-b743-478a-99df-134900e7dbd1",
+      "name": "Groq Chat Model (OpenAI compatible)"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dateTimeTool",
+      "typeVersion": 2,
+      "position": [
+        43984,
+        10656
+      ],
+      "id": "30ae7cda-2397-4a13-b231-042f772c3f56",
+      "name": "Date & Time"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Usa esta herramienta cuando el usuario quiera crear una nueva cita.",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_CALENDAR_ID",
+          "mode": "list",
+          "cachedResultName": "YOUR_GOOGLE_CALENDAR_ID"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', ``, 'string') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', ``, 'string') }}",
+        "additionalFields": {
+          "description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Description', ``, 'string') }}",
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        44112,
+        10656
+      ],
+      "id": "e8c4b775-f419-41d1-8571-cb27ca561ec2",
+      "name": "Agendar"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Usa esta herramienta cuando el usuario quiera mover una cita a otro dia u hora.\nSi necesitas reprogramar y no tienes el ID, primero usa la herramienta Consultar.",
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_CALENDAR_ID",
+          "mode": "list",
+          "cachedResultName": "YOUR_GOOGLE_CALENDAR_ID"
+        },
+        "eventId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Event_ID', ``, 'string') }}",
+        "updateFields": {
+          "description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Description', ``, 'string') }}",
+          "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', ``, 'string') }}",
+          "location": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Location', ``, 'string') }}",
+          "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', ``, 'string') }}",
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Summary', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        44240,
+        10656
+      ],
+      "id": "267e2ac4-47a0-4f30-90f9-28b77fd0858a",
+      "name": "Reprogramar"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Usa esta herramienta si el usuario quiere saber cuando tiene una cita.\nDevuelve eventos con Event ID, titulo y fechas para que puedas cancelar o reprogramar.",
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_CALENDAR_ID",
+          "mode": "list",
+          "cachedResultName": "YOUR_GOOGLE_CALENDAR_ID"
+        },
+        "limit": 10,
+        "timeMin": "={{ $now.minus({ week: 2 }) }}",
+        "timeMax": "={{ $now.plus({ week: 8 }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        44368,
+        10656
+      ],
+      "id": "8f99ccf4-8688-4c58-b14b-237074123c4c",
+      "name": "Consultar"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Usa esta herramienta si el usuario quiere eliminar una o mas citas existentes.\nRequiere Event ID; si no lo tienes, usa Consultar primero para encontrarlo.",
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_CALENDAR_ID",
+          "mode": "list",
+          "cachedResultName": "YOUR_GOOGLE_CALENDAR_ID"
+        },
+        "eventId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Event_ID', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        44496,
+        10656
+      ],
+      "id": "5cd9cf1d-5ba3-4805-a40d-557fe5af3185",
+      "name": "cancelar_evento"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "YOUR_WHATSAPP_PHONE_NUMBER_ID",
+        "recipientPhoneNumber": "YOUR_RECIPIENT_PHONE_NUMBER",
+        "textBody": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        44704,
+        10464
+      ],
+      "id": "e13467b5-1451-40de-ab53-f8f8a9d4876b",
+      "name": "Enviar WhatsApp",
+      "webhookId": "3f65b72a-7a55-4e0b-a470-25c74f7ef443"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        44928,
+        10464
+      ],
+      "id": "f3e1bf16-5a9c-48f5-ac50-d883b8362da2",
+      "name": "Responder"
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 6
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        43856,
+        10656
+      ],
+      "id": "78b09716-7a70-444e-8e72-f94095e8c010",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f2acdb9a-2b19-42a8-a977-f09f2eae9362",
+              "name": "msgType",
+              "value": "={{ $('Recepcion de Mensaje (WhatsApp)').item.json.body.entry[0].changes[0].value.messages[0].type }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        42384,
+        10464
+      ],
+      "id": "636a0201-f9e7-4c88-be43-94c7cff60d08",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.msgType }}",
+                    "rightValue": "audio",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "c436a1d6-97c6-413f-871c-ea2263209abf"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Voz"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "29ff9e88-4782-47f2-9ead-5fc8c35e660e",
+                    "leftValue": "={{ $json.msgType }}",
+                    "rightValue": "text",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Texto"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7b0db620-6607-47a3-a921-6efca2518d1a",
+                    "leftValue": "={{ $json.msgType }}",
+                    "rightValue": "image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Imagen"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        42592,
+        10448
+      ],
+      "id": "bbbf9a11-3036-44b6-af22-abab2ad0fca5",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "destinationKey": "image_base64",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        43184,
+        10752
+      ],
+      "id": "d338d7c7-f6fb-4b6c-bf13-1ac2d57109c9",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "has-message",
+              "leftValue": "={{ $json.body.entry[0].changes[0].value.messages[0].id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        41968,
+        10480
+      ],
+      "id": "07690880-e1f6-4d46-a1af-f3d1d2d41b13",
+      "name": "If Has Message"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "output",
+              "name": "output",
+              "value": "={{ (() => {\n  let text = '' + ($json.output || '');\n  const hadReprogram = /reprogram/i.test(text);\n\n  text = text\n    .replace(/<function[^>]*>/gi,'')\n    .replace(/<\\/function>/gi,'')\n    .replace(/Consultar\\s*\\{\\}/gi,'')\n    .replace(/cancelar_evento\\s*\\{[^}]*\\}/gi,'')\n    .replace(/Reprogramar\\s*\\{[^}]*\\}/gi,'')\n    .replace(/Agendar\\s*\\{[^}]*\\}/gi,'')\n\n    .replace(/Reprograma\\s*evento\\s*[-:]\\s*([^:\\n]+)\\s*:\\s*(\\d{2}\\/\\d{2}\\/\\d{4})\\s*([0-9:]{3,5})/gi,'La cita $1 ha sido reprogramada para $2 $3.')\n    .replace(/Agenda\\s*evento\\s*[-:]\\s*([^:\\n]+)\\s*:\\s*(\\d{2}\\/\\d{2}\\/\\d{4})\\s*([0-9:]{3,5})/gi,'La cita $1 ha sido agendada para $2 $3.')\n    .replace(/Cancela(?:r)?\\s*evento\\s*[-:]\\s*([^\\n:]+)/gi,'La cita $1 ha sido cancelada.')\n\n    .replace(/Agenda\\s+cita\\s*\\{[^}]*\"Summary\"\\s*:\\s*\"([^\"]+)\"[^}]*\"Start\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}/gi,'La cita $1 ha sido agendada para $2.')\n    .replace(/Agenda\\s+cita\\s*\\{[^}]*\"Start\"\\s*:\\s*\"([^\"]+)\"[^}]*\"Summary\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}/gi,'La cita $2 ha sido agendada para $1.')\n    .replace(/Reprograma(?:r)?\\s+cita\\s*\\{[^}]*\"Summary\"\\s*:\\s*\"([^\"]+)\"[^}]*\"Start\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}/gi,'La cita $1 ha sido reprogramada para $2.')\n    .replace(/Reprograma(?:r)?\\s+cita\\s*\\{[^}]*\"Start\"\\s*:\\s*\"([^\"]+)\"[^}]*\"Summary\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}/gi,'La cita $2 ha sido reprogramada para $1.')\n    .replace(/Cancelar\\s+cita\\s*\\{[^}]*\"Summary\"\\s*:\\s*\"([^\"]+)\"[^}]*\\}/gi,'La cita $1 ha sido cancelada.')\n\n    .replace(/Agenda\\s+cita\\s*\\{[^}]*'Summary'\\s*:\\s*'([^']+)'[^}]*'Start'\\s*:\\s*'([^']+)'[^}]*\\}/gi,'La cita $1 ha sido agendada para $2.')\n    .replace(/Agenda\\s+cita\\s*\\{[^}]*'Start'\\s*:\\s*'([^']+)'[^}]*'Summary'\\s*:\\s*'([^']+)'[^}]*\\}/gi,'La cita $2 ha sido agendada para $1.')\n    .replace(/Reprograma(?:r)?\\s+cita\\s*\\{[^}]*'Summary'\\s*:\\s*'([^']+)'[^}]*'Start'\\s*:\\s*'([^']+)'[^}]*\\}/gi,'La cita $1 ha sido reprogramada para $2.')\n    .replace(/Reprograma(?:r)?\\s+cita\\s*\\{[^}]*'Start'\\s*:\\s*'([^']+)'[^}]*'Summary'\\s*:\\s*'([^']+)'[^}]*\\}/gi,'La cita $2 ha sido reprogramada para $1.')\n    .replace(/Cancelar\\s+cita\\s*\\{[^}]*'Summary'\\s*:\\s*'([^']+)'[^}]*\\}/gi,'La cita $1 ha sido cancelada.')\n\n    .replace(/Agenda\\s+cita\\s*\\{[\\s\\S]*?\\}/gi,'')\n    .replace(/Reprograma(?:r)?\\s+cita\\s*\\{[\\s\\S]*?\\}/gi,'')\n    .replace(/Cancelar\\s+cita\\s*\\{[\\s\\S]*?\\}/gi,'')\n\n    .replace(/Revisa\\s+detalles\\s*/gi,'Tienes estas citas:\\n')\n    .replace(/Tienes\\s+las\\s+siguientes\\s+citas\\s+agendadas\\s*:/gi,'Tienes estas citas:')\n    .replace(/^\\s*\\d+\\.\\s*/gm,'- ')\n    .replace(/-\\s*([^-:\\n]+?)\\s*-\\s*(\\d{1,2}:\\d{2})\\s*de\\s*(\\d{2}\\/\\d{2}\\/\\d{4})/g,'- $1: $3 $2');\n\n  text = text.replace(/\\{[\\s\\S]*?\\}/g, (block) => {\n    if (!/(Summary|Start|Event_ID|End|Location|Description)/i.test(block)) return block;\n    const summaryMatch = block.match(/[\"']Summary[\"']\\s*:\\s*[\"']([^\"']+)[\"']/i);\n    const startMatch = block.match(/[\"']Start[\"']\\s*:\\s*[\"']([^\"']+)[\"']/i);\n    if (summaryMatch && startMatch) return `- ${summaryMatch[1]}: ${startMatch[1]}`;\n    if (summaryMatch) return `- ${summaryMatch[1]}`;\n    return '';\n  });\n\n  text = text\n    .replace(/^\\s*-\\s*$/gm,'')\n    .replace(/(Tienes estas citas:\\s*\\n)(?:Tienes estas citas:\\s*\\n)+/gi,'$1')\n    .replace(/Tienes estas citas:\\s*(?:\\n\\s*){2,}/gi,'Tienes estas citas:\\n')\n    .replace(/\\\\u00([0-9a-fA-F]{2})/g, (m,hex) => String.fromCharCode(parseInt(hex,16)))\n    .replace(/&aacute;/gi,'\\u00e1')\n    .replace(/&eacute;/gi,'\\u00e9')\n    .replace(/&iacute;/gi,'\\u00ed')\n    .replace(/&oacute;/gi,'\\u00f3')\n    .replace(/&uacute;/gi,'\\u00fa');\n\n  const header = 'Tienes estas citas:';\n  const idx = text.toLowerCase().indexOf(header.toLowerCase());\n  if (idx !== -1) {\n    const before = text.slice(0, idx + header.length);\n    const after = text.slice(idx + header.length).replace(/Tienes estas citas:/gi,'');\n    text = before + after;\n  }\n\n  text = text\n    .replace(/(\\d{4})-(\\d{2})-(\\d{2})[T ](\\d{2}):(\\d{2})(?::\\d{2})?/g,'$3/$2/$1 $4:$5')\n    .replace(/(\\d{2})\\/(\\d{2})\\/(\\d{4})[ T](\\d{1,2}):(\\d{2})(?::\\d{2})?/g, (m,d,mo,y,h,mi) => {\n      const hh = String(h).padStart(2,'0');\n      return `${d}/${mo}/${y} ${hh}:${mi}`;\n    })\n    .replace(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*(\\d{3,4})\\b/g, (m,date,t) => {\n      const tt = t.padStart(4,'0');\n      return `${date} ${tt.slice(0,2)}:${tt.slice(2)}`;\n    })\n    .replace(/(\\d{2}\\/\\d{2}\\/\\d{4})\\s*\\n\\s*(\\d{1,2}:\\d{2})/g,'$1 $2')\n    .replace(/(ha sido (?:agendada|reprogramada) para )(?:(\\d{2}\\/\\d{2}\\/\\d{4})\\s*(?:a las\\s*)?(\\d{1,2}:\\d{2}))/gi,'$1$2 $3')\n    .replace(/\\n{3,}/g,'\\n\\n')\n    .trim();\n\n  const hasAction = /ha sido (?:agendada|reprogramada|cancelada)/i.test(text);\n  if (hasAction) {\n    text = text.replace(/Tienes estas citas:\\s*(?:\\n-.*)*/gi,'').trim();\n  }\n\n  const hasList = /^\\s*-\\s+\\S/m.test(text);\n\n  if (!hasAction && hadReprogram && hasList) {\n    const matches = [...text.matchAll(/-\\s*([^:\\n]+):\\s*(\\d{2}\\/\\d{2}\\/\\d{4})\\s*(\\d{1,2}:\\d{2})/g)];\n    if (matches.length) {\n      const last = matches[matches.length - 1];\n      text = `La cita ${last[1].trim()} ha sido reprogramada para ${last[2]} ${last[3]}.`;\n    }\n  }\n\n  if (!hasAction && /^\\s*-\\s+\\S/m.test(text) && !/Tienes estas citas:/i.test(text)) {\n    text = 'Tienes estas citas:\\n' + text;\n  }\n\n  return text || '\\u00bfQu\\u00e9 deseas hacer? Puedes: consultar, agendar, reprogramar o cancelar.';\n})() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        44480,
+        10464
+      ],
+      "id": "aca81b5f-d5be-414c-a83e-9c3217f5d4f2",
+      "name": "Limpiar respuesta"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recepcion de Mensaje (WhatsApp)": {
+      "main": [
+        [
+          {
+            "node": "If Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "If Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Responder Verificacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If Has Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta Basica": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener audio (metadata)": {
+      "main": [
+        [
+          {
+            "node": "Descargar audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar audio": {
+      "main": [
+        [
+          {
+            "node": "Transcribir audio (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribir audio (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Contenido Voz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contenido Voz": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contenido Escrito": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener imagen (metadata)": {
+      "main": [
+        [
+          {
+            "node": "Descargar imagen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analizar imagen (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Contenido Imagen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contenido Imagen": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model (OpenAI compatible)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agendar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reprogramar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancelar_evento": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Limpiar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Obtener audio (metadata)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Contenido Escrito",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Obtener imagen (metadata)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar imagen": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Analizar imagen (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Has Message": {
+      "main": [
+        [
+          {
+            "node": "Respuesta Basica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpiar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}

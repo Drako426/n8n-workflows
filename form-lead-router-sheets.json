@@ -1,0 +1,294 @@
+{
+  "name": "Form Lead Router to Sheets + Email",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "typeform-taller2",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -144
+      ],
+      "id": "ce38936b-b672-4945-9294-97f4906b7fe6",
+      "name": "Webhook",
+      "webhookId": "cd120ed4-da74-4649-a30e-cfb7cdd3ed83"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cce42c4a-8d98-45d4-ae3c-ad2561c1c258",
+              "leftValue": "={{ $json.body.form_response.answers[2].number }}",
+              "rightValue": 18,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        224,
+        -144
+      ],
+      "id": "99a947fc-de8e-4c60-a3b3-d797595e50e5",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "Datos del form taller 2",
+        "emailType": "text",
+        "message": "=Cordial saludo: El señor(a) {{ $json.Nombres }} {{ $json.Apellidos }} ha informado que tiene interés en la carrera {{ $('Webhook').item.json.body.form_response.answers[4].choice.label }}, se sugiere al departamento de mercadeo ponerse en contacto al número {{ $json.Telefono }}. Gracias por su atención.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        -144
+      ],
+      "id": "d257018e-a498-4751-8596-c454b7918ed1",
+      "name": "Send a message",
+      "webhookId": "f661c899-2434-4f22-a635-3abb3016d63f"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?gid=1355934167#gid=1355934167",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{$json.body.form_response.answers[4].choice.label}}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Nombres": "={{$json.body.form_response.answers[0].text}}",
+            "Apellidos": "={{$json.body.form_response.answers[1].text}}",
+            "Edad": "={{$json.body.form_response.answers[2].number}}",
+            "Telefono": "={{$json.body.form_response.answers[3].text}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Nombres",
+              "displayName": "Nombres",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Apellidos",
+              "displayName": "Apellidos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Edad",
+              "displayName": "Edad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Telefono",
+              "displayName": "Telefono",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        448,
+        -240
+      ],
+      "id": "fd1a625f-67fc-40a6-ac6b-cc03448d2b22",
+      "name": "Carreras"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?gid=530775471#gid=530775471",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1355934167,
+          "mode": "list",
+          "cachedResultName": "menores",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=1355934167"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Nombres": "={{ $('Webhook').item.json.body.form_response.answers[0].text }}",
+            "Apellidos": "={{ $('Webhook').item.json.body.form_response.answers[1].text }}",
+            "Edad": "={{ $('Webhook').item.json.body.form_response.answers[2].number }}",
+            "Telefono": "={{ $('Webhook').item.json.body.form_response.answers[3].text }}",
+            "Carrera de Interes": "={{ $json.body.form_response.answers[4].choice.label }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Nombres",
+              "displayName": "Nombres",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Apellidos",
+              "displayName": "Apellidos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Edad",
+              "displayName": "Edad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Telefono",
+              "displayName": "Telefono",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Carrera de Interes",
+              "displayName": "Carrera de Interes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        448,
+        -48
+      ],
+      "id": "8b285c14-544e-4105-9963-0e1f19cc5eb4",
+      "name": "menores"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Carreras",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "menores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carreras": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "menores": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "tags": []
+}

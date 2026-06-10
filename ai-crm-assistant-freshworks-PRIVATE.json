@@ -1,0 +1,1384 @@
+{
+  "name": "AI CRM Assistant (Freshworks + Dentalink)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "freshworks-incoming",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        13888,
+        26928
+      ],
+      "id": "3f96b993-3aa9-4929-b42f-0638cee065de",
+      "name": "Freshworks Webhook",
+      "webhookId": "freshworks-incoming"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraer datos del webhook de Freshworks.\nconst body = $json.body || $json;\nconst action = body.action || body.event || '';\nconst actor = body.actor || {};\nconst data = body.data || {};\nconst msg = data.message || body.message || {};\nconst parts = msg.message_parts || data.message_parts || [];\nconst conv = msg.conversation_id || data.conversation_id || body.conversation_id || '';\n\nlet userText = '';\nlet audioFileUrl = '';\nlet audioFileName = '';\nlet imageFileUrl = '';\nlet imageFileName = '';\nlet fileUrl = '';\nlet fileName = '';\nlet fileContentType = '';\n\nfunction firstUrl(attachment) {\n  if (!attachment) return '';\n  return attachment.url || attachment.download_url || attachment.full_size_url || attachment.file_url || attachment.thumbnail_url || '';\n}\n\nfor (const part of parts) {\n  if (part.text?.content) userText += part.text.content + ' ';\n  if (typeof part.text === 'string') userText += part.text + ' ';\n\n  if (part.image) {\n    userText += '[imagen] ';\n    imageFileUrl = imageFileUrl || firstUrl(part.image);\n    imageFileName = imageFileName || part.image.name || part.image.file_name || 'imagen';\n  }\n\n  if (part.audio) {\n    userText += '[audio] ';\n    audioFileUrl = audioFileUrl || firstUrl(part.audio);\n    audioFileName = audioFileName || part.audio.name || part.audio.file_name || 'audio.ogg';\n  }\n\n  if (part.file) {\n    const ct = (part.file.content_type || part.file.mime_type || '').toLowerCase();\n    const isAudioFile = ct.startsWith('audio/') || ['ogg','mpeg','mp4','m4a','wav','webm','aac','flac'].some(e => ct.includes(e));\n    if (isAudioFile) {\n      userText += '[audio] ';\n      audioFileUrl = audioFileUrl || firstUrl(part.file);\n      audioFileName = audioFileName || part.file.name || part.file.file_name || 'audio.ogg';\n    } else {\n      userText += '[archivo] ';\n      fileUrl = fileUrl || firstUrl(part.file);\n      fileName = fileName || part.file.name || part.file.file_name || 'archivo';\n      fileContentType = fileContentType || ct;\n    }\n  }\n}\n\nif (!userText && msg.content) userText = String(msg.content);\nif (!userText && data.content) userText = String(data.content);\nif (!userText && body.content) userText = String(body.content);\nuserText = userText.trim();\n\nconst actorType = String(actor.actor_type || msg.actor_type || data.actor_type || '').toLowerCase();\nconst messageType = String(msg.message_type || data.message_type || '').toLowerCase();\nconst isOutgoingActor = ['agent', 'bot', 'admin', 'system'].includes(actorType);\nconst isPrivateOrSystem = ['private', 'system'].includes(messageType);\nconst isMessageCreate = !action || String(action).toLowerCase() === 'message_create';\nconst actorId = actor.actor_id || msg.actor_id || data.user_id || '';\nconst messageId = msg.id || msg.message_id || data.message_id || body.message_id || '';\nconst createdTime = msg.created_time || data.created_time || body.created_time || '';\nconst duplicateKey = messageId\n  ? 'message:' + messageId\n  : (createdTime && conv ? 'fallback:' + conv + ':' + (actorId || 'no-user') + ':' + createdTime : '');\n\nconst hasImage = Boolean(imageFileUrl || userText.includes('[imagen]'));\nconst hasFile = Boolean(fileUrl || userText.includes('[archivo]'));\nconst isUserMessage =\n  isMessageCreate &&\n  !isOutgoingActor &&\n  !isPrivateOrSystem &&\n  userText.length > 0;\n\nreturn [{\n  userText,\n  sessionId: conv || actorId || 'anon_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),\n  conversationId: conv,\n  userId: actorId,\n  messageId,\n  createdTime,\n  duplicateKey,\n  isUserMessage,\n  rawAction: action,\n  actorType,\n  messageType,\n  hasAudio: Boolean(audioFileUrl),\n  audioFileUrl,\n  audioFileName,\n  hasImage,\n  imageFileUrl,\n  imageFileName,\n  hasFile,\n  fileUrl,\n  fileName,\n  fileContentType,\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14112,
+        26928
+      ],
+      "id": "5393548b-9fc9-48f9-b9ec-7e412552f934",
+      "name": "Extraer mensaje"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f263052e-6c06-4004-aedf-51d15943b6da",
+              "leftValue": "={{ $json.isUserMessage && !$json.isDuplicate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        14560,
+        26928
+      ],
+      "id": "c66899c3-a50a-427c-b31c-d31e46c01aa8",
+      "name": "Es mensaje de usuario?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const originalText = ($json.userText || '').trim();\nconst normalizedText = originalText\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/\\s+/g, ' ')\n  .toLowerCase()\n  .trim();\n\nconst cleanText = normalizedText\n  .replace(/\\[(imagen|archivo|audio|audio no procesado)\\]/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst tokens = cleanText\n  .split(/[^a-z0-9+]+/i)\n  .map((token) => token.trim())\n  .filter(Boolean);\n\nconst hasImage = Boolean($json.hasImage || originalText.includes('[imagen]'));\nconst hasFile = Boolean($json.hasFile || originalText.includes('[archivo]'));\nconst hasMedia = hasImage || hasFile;\nconst mediaKind = hasImage ? 'imagen' : (hasFile ? 'archivo' : 'texto');\nconst phoneMatch = originalText.match(/(?:\\+?57\\s?)?(3\\d{2}[\\s.-]?\\d{3}[\\s.-]?\\d{4})/);\nconst phone = phoneMatch ? phoneMatch[0].replace(/[^+\\d]/g, '') : '';\n\nconst namePatterns = [\n  /(?:mi nombre es|me llamo|soy)\\s+([A-Z\\u00C0-\\u017F][A-Za-z\\u00C0-\\u017F]+(?:\\s+[A-Z\\u00C0-\\u017F][A-Za-z\\u00C0-\\u017F]+){0,3})/,\n  /(?:nombre[:\\s]+)([A-Z\\u00C0-\\u017F][A-Za-z\\u00C0-\\u017F]+(?:\\s+[A-Z\\u00C0-\\u017F][A-Za-z\\u00C0-\\u017F]+){0,3})/,\n];\n\nlet fullName = '';\nfor (const pattern of namePatterns) {\n  const match = originalText.match(pattern);\n  if (match?.[1]) {\n    fullName = match[1].trim().replace(/[.,;:]+$/, '');\n    break;\n  }\n}\n\nfunction escapeRegExp(value) {\n  return String(value || '').replace(/[-/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');\n}\n\nfunction countHits(words) {\n  return words.reduce((count, word) => {\n    const normalized = String(word || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();\n    if (!normalized) return count;\n    if (normalized.includes(' ')) return count + (cleanText.includes(normalized) ? 1 : 0);\n    return count + (new RegExp('\\\\b' + escapeRegExp(normalized) + '\\\\b').test(cleanText) ? 1 : 0);\n  }, 0);\n}\n\nconst explicitEnglish =\n  /\\b(no spanish|no espanol|english|ingles|in english|speak english|can you speak english)\\b/.test(cleanText) ||\n  /no\\s+(spanish|espanol).*(english|ingles)/.test(cleanText);\nconst explicitSpanish =\n  !explicitEnglish &&\n  (/\\b(espanol|spanish|en espanol|habla espanol|speak spanish|no english|no ingles)\\b/.test(cleanText) ||\n  /no\\s+(english|ingles).*(spanish|espanol)/.test(cleanText));\n\nconst englishHits = countHits([\n  'hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'please', 'thanks',\n  'price', 'cost', 'how much', 'appointment', 'book', 'schedule', 'reschedule', 'cancel',\n  'location', 'address', 'where', 'service', 'treatment', 'advisor', 'dentist', 'doctor',\n  'photo', 'picture', 'xray', 'x-ray', 'radiography', 'quote', 'estimate'\n]);\nconst spanishHits = countHits([\n  'hola', 'buenas', 'buenos dias', 'buenas tardes', 'buenas noches', 'por favor', 'gracias',\n  'precio', 'valor', 'cuanto cuesta', 'cita', 'agendar', 'reprogramar', 'cancelar',\n  'ubicacion', 'direccion', 'donde', 'servicio', 'tratamiento', 'asesor', 'odontologo', 'doctor',\n  'foto', 'imagen', 'radiografia', 'cotizacion', 'presupuesto'\n]);\n\nlet detectedLanguage = '';\nif (englishHits > 0 && englishHits >= spanishHits) detectedLanguage = 'en';\nelse if (spanishHits > 0 && spanishHits > englishHits) detectedLanguage = 'es';\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.conversationState) staticData.conversationState = {};\nconst stateKey = $json.sessionId || $json.conversationId || $json.userId || 'unknown';\nconst state = staticData.conversationState[stateKey] || {};\nconst explicitLanguage = explicitEnglish ? 'en' : (explicitSpanish ? 'es' : '');\n\nif (explicitLanguage) state.languagePreference = explicitLanguage;\nif (detectedLanguage) state.lastDetectedLanguage = detectedLanguage;\nstate.updatedAt = new Date().toISOString();\nstaticData.conversationState[stateKey] = state;\n\nconst responseLanguage = explicitLanguage || state.languagePreference || detectedLanguage || state.lastDetectedLanguage || 'es';\nconst languageSource = explicitLanguage\n  ? 'explicit'\n  : (state.languagePreference ? 'preference' : (detectedLanguage ? 'detected' : (state.lastDetectedLanguage ? 'last_detected' : 'default')));\n\nreturn [{\n  ...$json,\n  originalText,\n  normalizedText,\n  cleanText,\n  tokens,\n  contactInfo: {\n    fullName,\n    phone,\n    hasName: Boolean(fullName),\n    hasPhone: Boolean(phone),\n  },\n  language: {\n    response: responseLanguage,\n    detected: detectedLanguage,\n    explicit: explicitLanguage,\n    preference: state.languagePreference || '',\n    lastDetected: state.lastDetectedLanguage || '',\n    source: languageSource,\n  },\n  conversationState: state,\n  messageMeta: {\n    length: originalText.length,\n    tokenCount: tokens.length,\n    hasImage,\n    hasFile,\n    hasMedia,\n    mediaKind,\n    imageFileUrl: $json.imageFileUrl || '',\n    imageFileName: $json.imageFileName || '',\n    fileUrl: $json.fileUrl || '',\n    fileName: $json.fileName || '',\n    fileContentType: $json.fileContentType || '',\n    normalizedAt: new Date().toISOString(),\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15680,
+        26928
+      ],
+      "id": "33e56d45-7380-4cf7-bab0-b3f779223dc4",
+      "name": "Normalizar mensaje"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.cleanText || $json.normalizedText || '';\nconst includesAny = (words) => words.some((word) => text.includes(\n  String(word || '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toLowerCase()\n));\n\nfunction escapeRegExp(value) {\n  return String(value || '').replace(/[-/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');\n}\n\nfunction detectAppointmentAction() {\n  if (includesAny(['cancelar cita', 'cancela mi cita', 'anular cita', 'eliminar cita', 'no puedo asistir', 'cancel appointment', 'cancel my appointment'])) return 'cancelar';\n  if (includesAny(['reprogramar', 'cambiar cita', 'mover cita', 'aplazar', 'posponer', 'cambiar la hora', 'cambiar fecha', 'reschedule', 'change appointment'])) return 'reprogramar';\n  if (includesAny(['consultar cita', 'tengo cita', 'mi cita', 'cuando es mi cita', 'confirmar cita', 'ver mi cita', 'confirm appointment', 'check appointment'])) return 'consultar';\n  if (includesAny(['agendar', 'agenda', 'sacar cita', 'quiero cita', 'necesito cita', 'reservar', 'programar cita', 'separar cita', 'turno', 'disponibilidad', 'hora disponible', 'appointment', 'book', 'schedule', 'availability'])) return 'agendar';\n  return 'none';\n}\n\nfunction detectClinicalService() {\n  const services = [\n    { id: 'armonizacion_facial', words: ['armonizacion facial', 'armonizacion', 'mandibula', 'menton', 'labios', 'pomulos', 'perfil facial', 'acido hialuronico', 'facial harmonization', 'facial balancing', 'jawline', 'chin', 'lips', 'cheeks'] },\n    { id: 'lifting', words: ['lifting', 'lifting facial', 'ritidoplastia', 'flacidez', 'papada', 'rejuvenecimiento facial', 'facelift', 'face lift', 'sagging skin'] },\n    { id: 'ortodoncia', words: ['ortodoncia', 'brackets', 'alineadores', 'alineador', 'invisalign', 'orthodontics', 'braces', 'aligners'] },\n    { id: 'implantes', words: ['implante', 'implantes', 'implantologia', 'diente perdido', 'molar perdido', 'dental implant', 'dental implants', 'missing tooth', 'missing teeth'] },\n    { id: 'diseno_sonrisa', words: ['diseno de sonrisa', 'resinas esteticas', 'carillas', 'blanqueamiento', 'sonrisa', 'smile makeover', 'smile design', 'veneers', 'whitening', 'teeth whitening'] },\n    { id: 'endodoncia', words: ['endodoncia', 'conducto', 'tratamiento de conducto', 'nervio dental', 'dolor dental', 'root canal', 'tooth nerve', 'tooth pain'] },\n    { id: 'periodoncia', words: ['periodoncia', 'encias', 'encia', 'sangrado al cepillar', 'periodontitis', 'gingivitis', 'movilidad dental', 'periodontics', 'gums', 'bleeding gums', 'gum disease'] },\n    { id: 'maxilofacial', words: ['maxilofacial', 'cirugia maxilofacial', 'cordales', 'fracturas faciales', 'mandibulares', 'extraccion de cordales', 'maxillofacial', 'wisdom teeth', 'wisdom tooth', 'jaw surgery'] },\n    { id: 'rehabilitacion_oral', words: ['rehabilitacion oral', 'dientes desgastados', 'dientes fracturados', 'perdida dental', 'masticar', 'oral rehabilitation', 'worn teeth', 'fractured teeth'] },\n    { id: 'estetica_dental', words: ['estetica dental', 'blanqueamiento dental', 'cosmetic dentistry', 'dental aesthetics'] },\n    { id: 'cirugia_oral', words: ['cirugia oral', 'muela del juicio', 'extraccion', 'oral surgery', 'tooth extraction'] },\n    { id: 'limpieza_revision', words: ['limpieza', 'profilaxis', 'revision dental', 'control dental', 'dental cleaning', 'checkup'] },\n    { id: 'urgencia', words: ['urgencia', 'dolor', 'sangrado', 'inflamacion', 'infeccion', 'emergency'] },\n  ];\n\n  const matchesService = (words) => words.some(word => {\n    const normalized = String(word || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();\n    if (!normalized.includes(' ')) {\n      return new RegExp('\\\\b' + escapeRegExp(normalized) + '\\\\b').test(text);\n    }\n    return text.includes(normalized);\n  });\n\n  return services.find((service) => matchesService(service.words))?.id || 'desconocido';\n}\n\nfunction detectGeneralTopic() {\n  if (includesAny(['ubicacion', 'ubicados', 'ubicado', 'direccion', 'donde estan', 'donde quedan', 'donde queda', 'sede', 'como llegar', 'maps', 'pereira', 'location', 'address', 'where are you', 'where are you located', 'how to get there'])) return 'ubicacion';\n  if (includesAny(['horario', 'hora atienden', 'atienden', 'abren', 'cierran', 'sabado', 'domingo', 'festivo', 'hours', 'opening hours', 'business hours', 'open', 'close'])) return 'horario';\n  if (includesAny(['telefono', 'whatsapp', 'numero', 'contacto', 'llamar', 'celular', 'phone', 'contact', 'call', 'number'])) return 'contacto';\n  if (includesAny(['servicios', 'tratamientos', 'especialidades', 'que hacen', 'que ofrecen', 'services', 'treatments', 'specialties'])) return 'servicios';\n  if (includesAny(['pago', 'pagos', 'tarjeta', 'transferencia', 'efectivo', 'financiacion', 'credito', 'payment', 'payments', 'card', 'cash', 'financing', 'credit'])) return 'pagos';\n  return '';\n}\n\nconst appointmentAction = detectAppointmentAction();\nconst clinicalService = detectClinicalService();\nconst generalTopic = detectGeneralTopic();\nconst isGreeting = /^(hola|buenas|buenos dias|buenas tardes|buenas noches|hello|hi|hey|ola)\\b/.test(text);\nconst asksPrice = includesAny(['precio', 'valor', 'cuanto cuesta', 'costo', 'vale', 'tarifa', 'cotizacion', 'presupuesto', 'price', 'cost', 'how much', 'quote', 'estimate', 'budget']);\nconst asksInfo = Boolean(generalTopic) || includesAny(['informacion', 'info', 'que es', 'como funciona', 'cuentame', 'me interesa', 'quiero saber', 'explicame', 'donde', 'cuando', 'cual', 'cuales', 'information', 'what is', 'how does it work', 'tell me', 'interested', 'where', 'when', 'which']);\nconst asksAvailability = includesAny(['disponibilidad', 'hay cupo', 'hay cita', 'hoy', 'manana', 'esta semana', 'lo antes posible', 'urgente', 'availability', 'available', 'today', 'tomorrow', 'this week', 'as soon as possible', 'urgent']);\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.conversationState) staticData.conversationState = {};\nconst stateKey = $json.sessionId || $json.conversationId || $json.userId || 'unknown';\nconst state = staticData.conversationState[stateKey] || $json.conversationState || {};\nconst rememberedService = state.lastService || '';\nconst canUseRememberedService =\n  clinicalService === 'desconocido' &&\n  rememberedService &&\n  !generalTopic &&\n  (asksPrice || asksInfo || appointmentAction !== 'none' || Boolean($json.messageMeta?.hasMedia));\n\nconst requestedService = clinicalService !== 'desconocido'\n  ? clinicalService\n  : (canUseRememberedService ? rememberedService : (generalTopic ? 'general' : 'desconocido'));\nconst serviceResolvedFromMemory = Boolean(canUseRememberedService);\n\nlet primaryIntent = 'desconocida';\nif (appointmentAction !== 'none') primaryIntent = 'gestion_cita';\nelse if (asksPrice) primaryIntent = 'precio';\nelse if (asksInfo || requestedService !== 'desconocido') primaryIntent = 'informacion';\nelse if (isGreeting) primaryIntent = 'saludo';\n\nif (clinicalService !== 'desconocido' && clinicalService !== 'general' && clinicalService !== 'urgencia') {\n  state.lastService = clinicalService;\n}\nif (primaryIntent !== 'desconocida') state.lastIntent = primaryIntent;\nstate.lastUserText = $json.originalText || $json.userText || '';\nstate.updatedAt = new Date().toISOString();\nstaticData.conversationState[stateKey] = state;\n\nconst leadSignals = [];\nlet leadScore = 0;\nif (appointmentAction !== 'none') { leadScore += 40; leadSignals.push('gestion_cita'); }\nif (asksPrice) { leadScore += 25; leadSignals.push('pregunta_precio'); }\nif (requestedService !== 'desconocido') { leadScore += 20; leadSignals.push(serviceResolvedFromMemory ? 'servicio_recordado' : 'servicio_identificado'); }\nif (generalTopic) { leadScore += 10; leadSignals.push('general_' + generalTopic); }\nif (asksAvailability) { leadScore += 15; leadSignals.push('busca_disponibilidad'); }\nif ($json.contactInfo?.hasPhone) { leadScore += 10; leadSignals.push('telefono_detectado'); }\nif ($json.contactInfo?.hasName) { leadScore += 5; leadSignals.push('nombre_detectado'); }\n\nconst normalizedLeadScore = Math.min(100, leadScore);\nconst leadTemperature = normalizedLeadScore >= 70 ? 'caliente' : normalizedLeadScore >= 40 ? 'tibio' : 'frio';\n\nreturn [{\n  ...$json,\n  intent: {\n    primary: primaryIntent,\n    appointmentAction,\n    asksPrice,\n    asksInfo,\n    asksAvailability,\n    isGreeting,\n    generalTopic,\n  },\n  appointmentIntent: appointmentAction,\n  requestedService,\n  effectiveService: requestedService,\n  serviceResolvedFromMemory,\n  conversationState: state,\n  leadScore: normalizedLeadScore,\n  leadSignals,\n  leadTemperature,\n  isHotLead: leadTemperature === 'caliente',\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15904,
+        26928
+      ],
+      "id": "2212d62a-7a47-40ab-8e56-cfb8b439c71a",
+      "name": "Detectar intencion"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.normalizedText || '';\nconst includesAny = (words) => words.some((word) => text.includes(word));\n\nconst humanRequested = /(hablar con .*(doctor|doctora|medico|medica|asesor|asesora|humano|persona|alguien|agente)|necesito.*(doctor|doctora|medico|medica|asesor|asesora)|quiero.*hablar.*con|comunic.*(doctor|doctora|medico|asesor|asesora)|atencion.*humana|me atiende.*persona|pasame.*(asesor|humano)|necesito.*medico|quiero.*medico)/i.test(text);\n\nconst clinicalRisk = includesAny([\n  'dolor fuerte',\n  'dolor insoportable',\n  'dolor agudo',\n  'mucho dolor',\n  'me duele mucho',\n  'me duele horrible',\n  'dolor intenso',\n  'sangrado',\n  'hemorragia',\n  'fiebre',\n  'infeccion',\n  'pus',\n  'inflamacion fuerte',\n  'muy inflamado',\n  'no puedo respirar',\n  'urgencia',\n  'emergencia',\n  'complicacion',\n  'no puedo comer',\n  'no puedo dormir del dolor',\n]);\n\nconst softPainRisk = includesAny([\n  'me duele',\n  'tengo dolor',\n  'dolor de muela',\n  'dolor de diente',\n  'dolor en la boca',\n  'me esta doliendo',\n  'me duelen',\n]);\n\nconst commercialRisk = includesAny([\n  'reclamo',\n  'queja',\n  'garantia',\n  'devolucion',\n  'demanda',\n  'abogado',\n  'mala praxis',\n  'me fue mal',\n]);\n\nconst sensitiveRequest = includesAny([\n  'diagnostico',\n  'recetame',\n  'medicamento',\n  'antibiotico',\n  'anestesia',\n  'embarazada',\n  'menor de edad',\n]);\n\nconst riskReasons = [];\nif (humanRequested) riskReasons.push('solicitud_humano');\nif (clinicalRisk) riskReasons.push('riesgo_clinico');\nif (softPainRisk) riskReasons.push('dolor_leve');\nif (commercialRisk) riskReasons.push('riesgo_comercial');\nif (sensitiveRequest) riskReasons.push('consulta_sensible');\n\nconst riskLevel = clinicalRisk || commercialRisk || sensitiveRequest ? 'alto' : (humanRequested || softPainRisk ? 'medio' : 'bajo');\n\nreturn [{\n  ...$json,\n  humanRequested,\n  softPainRisk,\n  risk: {\n    level: riskLevel,\n    clinicalRisk,\n    softPainRisk,\n    commercialRisk,\n    sensitiveRequest,\n    reasons: riskReasons,\n  },\n  highRisk: riskLevel === 'alto',\n  mediumRisk: riskLevel === 'medio',\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16128,
+        26928
+      ],
+      "id": "010d1f04-00d8-47bc-988d-a66aedf0c0b3",
+      "name": "Detectar riesgo/humano"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sourceItem = $items('Detectar riesgo/humano', 0, 0)[0]?.json || $input.all()[0]?.json || {};\nconst text = sourceItem.normalizedText || '';\nconst service = sourceItem.effectiveService || sourceItem.requestedService || 'desconocido';\nconst intent = sourceItem.intent || {};\n\nfunction normalize(value) {\n  return String(value || '')\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\nconst includesAny = (words) => words.some((word) => text.includes(normalize(word)));\nconst hitCount = (words) => words.reduce((count, word) => count + (text.includes(normalize(word)) ? 1 : 0), 0);\n\nconst internalKnowledge = [\n  {\n    id: 'menu-general',\n    service: 'general',\n    intents: ['saludo'],\n    anchors: ['hola', 'buenas', 'buenos dias', 'buenas tardes', 'buenas noches'],\n    text: 'CiruNova puede orientar sobre citas, cirugias, asesorias y paso a asesor humano.',\n  },\n  {\n    id: 'general-servicios',\n    service: 'general',\n    intents: ['informacion'],\n    anchors: ['servicios', 'tratamientos', 'especialidades', 'que hacen', 'que ofrecen'],\n    text: 'Servicios disponibles: odontologia general, cirugias orales y maxilofaciales, ortodoncia, diseno de sonrisa, implantes dentales, endodoncia, periodoncia, rehabilitacion oral, lifting facial, armonizacion facial.',\n  },\n  {\n    id: 'general-horario',\n    service: 'general',\n    intents: ['informacion'],\n    anchors: ['horario', 'atienden', 'abren', 'cierran', 'sabado', 'domingo', 'festivo'],\n    text: 'Horario: lunes a viernes 8:00am-6:00pm, sabados 8:00am-12:00pm.',\n  },\n  {\n    id: 'general-ubicacion',\n    service: 'general',\n    intents: ['informacion'],\n    anchors: ['ubicacion', 'ubicado', 'ubicados', 'direccion', 'donde estan', 'donde quedan', 'donde queda', 'sede', 'como llegar', 'maps', 'pereira'],\n    text: 'Direccion: Calle 14 #25-39, Pereira, Colombia.',\n  },\n  {\n    id: 'general-contacto',\n    service: 'general',\n    intents: ['informacion'],\n    anchors: ['telefono', 'whatsapp', 'numero', 'contacto', 'llamar', 'celular'],\n    text: 'Telefono Cirumax: +57 315 8888120. WhatsApp CRM: +57 314 3066978.',\n  },\n  {\n    id: 'agenda-general',\n    service: 'general',\n    intents: ['gestion_cita'],\n    anchors: ['cita', 'agenda', 'agendar', 'reservar', 'disponibilidad', 'consultar cita', 'reprogramar', 'cancelar'],\n    text: 'Datos para cita: nombre completo, telefono o documento, servicio, fecha preferida, franja horaria.',\n  },\n  {\n    id: 'lifting-info',\n    service: 'lifting',\n    intents: ['informacion'],\n    anchors: ['lifting', 'ritidoplastia', 'flacidez', 'rostro', 'facial', 'papada', 'rejuvenecimiento'],\n    text: 'Lifting facial: mejora flacidez, definicion y armonia del rostro. Resultado natural. Preguntar que quiere mejorar.',\n  },\n  {\n    id: 'lifting-precio',\n    service: 'lifting',\n    intents: ['precio'],\n    anchors: ['lifting', 'facial', 'precio', 'valor', 'costo', 'cuanto cuesta', 'cotizacion', 'presupuesto'],\n    text: 'Precio lifting: depende de flacidez, zonas, resultado deseado. Requiere valoracion presencial. Ofrecer agendar.',\n  },\n  {\n    id: 'lifting-recuperacion',\n    service: 'lifting',\n    intents: ['informacion'],\n    anchors: ['lifting', 'recuperacion', 'incapacidad', 'postoperatorio', 'reposo', 'cuidados'],\n    text: 'Recuperacion lifting: depende del procedimiento y paciente. Valoracion explica tiempos y cuidados.',\n  },\n  {\n    id: 'ortodoncia-info',\n    service: 'ortodoncia',\n    intents: ['informacion', 'precio'],\n    anchors: ['ortodoncia', 'brackets', 'alineadores', 'invisalign', 'precio', 'valor'],\n    text: 'Ortodoncia: valoracion revisa mordida, alineacion, objetivos. Opciones: brackets o alineadores. Precio segun caso.',\n  },\n  {\n    id: 'implantes-info',\n    service: 'implantes',\n    intents: ['informacion', 'precio'],\n    anchors: ['implante', 'implantes', 'implantologia', 'diente perdido', 'molar perdido', 'precio', 'valor'],\n    text: 'Implantes: requiere valoracion de hueso, salud oral, zona. Presupuesto segun caso clinico.',\n  },\n  {\n    id: 'estetica-info',\n    service: 'estetica_dental',\n    intents: ['informacion', 'precio'],\n    anchors: ['estetica dental', 'diseno de sonrisa', 'blanqueamiento', 'carillas', 'sonrisa', 'precio', 'valor'],\n    text: 'Estetica dental: se evalua sonrisa, color, forma, encia, expectativas. Recomendacion depende de valoracion.',\n  },\n  {\n    id: 'cirugia-info',\n    service: 'cirugia_oral',\n    intents: ['informacion', 'precio'],\n    anchors: ['cirugia', 'maxilofacial', 'cordales', 'muela del juicio', 'extraccion', 'precio', 'valor'],\n    text: 'Cirugia oral/maxilofacial: requiere valoracion, imagenes diagnosticas si aplican, revision de complejidad.',\n  },\n  {\n    id: 'urgencia-handoff',\n    service: 'urgencia',\n    intents: ['informacion'],\n    anchors: ['urgencia', 'dolor', 'sangrado', 'inflamacion', 'infeccion'],\n    text: 'Urgencia: dolor fuerte, sangrado, infeccion, fiebre → conectar con asesor/profesional.',\n  },\n];\n\nfunction parseList(value) {\n  return String(value || '')\n    .split(/[|,;]/)\n    .map((item) => normalize(item))\n    .filter(Boolean);\n}\n\nfunction isActive(value) {\n  return !['false', 'falso', 'no', '0', 'inactive', 'inactivo'].includes(normalize(value));\n}\n\nconst sheetRows = $input.all()\n  .map((item) => item.json || {})\n  .filter((row) => !row.error && isActive(row.active ?? true) && row.text);\n\nconst sheetKnowledge = sheetRows.map((row, index) => ({\n  id: row.id || 'sheet-' + (index + 1),\n  service: normalize(row.service || 'general'),\n  intents: parseList(row.intents || row.intent || 'informacion'),\n  anchors: parseList(row.anchors || row.keywords || row.palabras_clave || ''),\n  text: String(row.text || row.respuesta || '').trim(),\n  source: 'sheet',\n}));\n\nconst approvedKnowledge = sheetKnowledge.length > 0 ? sheetKnowledge : internalKnowledge.map((item) => ({ ...item, source: 'internal' }));\n\nfunction scoreKnowledge(item) {\n  if (item.service !== 'general' && service !== item.service) return 0;\n\n  if (item.service === 'general') {\n    const allowGeneral = service === 'general' || ['saludo', 'gestion_cita', 'informacion', 'precio'].includes(intent.primary);\n    if (!allowGeneral) return 0;\n  }\n\n  let score = hitCount(item.anchors);\n  if (item.intents.includes(intent.primary)) score += 2;\n  if (item.service !== 'general' && service === item.service) score += 2;\n  if (item.service === 'general' && service === 'general') score += 2;\n  if (intent.generalTopic && item.id.includes(intent.generalTopic)) score += 4;\n  if (intent.asksPrice && item.intents.includes('precio')) score += 1;\n  if (intent.primary === 'saludo' && item.id === 'menu-general') score += 4;\n  if (intent.primary === 'gestion_cita' && item.id === 'agenda-general') score += 4;\n  return score;\n}\n\nconst candidates = approvedKnowledge\n  .map((item) => ({ ...item, score: scoreKnowledge(item) }))\n  .filter((item) => item.score > 0)\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 3);\n\nconst topScore = candidates[0]?.score || 0;\nconst confidenceScore = Math.min(1, topScore / 6);\nconst confidenceLevel = confidenceScore >= 0.7 ? 'alta' : confidenceScore >= 0.5 ? 'media' : 'baja';\n\nreturn [{\n  json: {\n    ...sourceItem,\n    approvedKnowledgeVersion: sheetKnowledge.length > 0 ? 'sheet.Conocimiento' : 'internal.2026-05-16.v5',\n    knowledgeSource: sheetKnowledge.length > 0 ? 'sheet' : 'internal',\n    knowledgeRowsLoaded: sheetKnowledge.length,\n    knowledgeCandidates: candidates,\n    knowledgeConfidence: {\n      score: confidenceScore,\n      level: confidenceLevel,\n      found: candidates.length > 0,\n    },\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16576,
+        26928
+      ],
+      "id": "cc3b85e5-2045-4c47-8b49-f78894f44756",
+      "name": "Buscar conocimiento aprobado"
+    },
+    {
+      "parameters": {
+        "jsCode": "const intent = $json.intent || {};\nconst risk = $json.risk || {};\nconst knowledge = $json.knowledgeConfidence || { found: false, level: 'baja', score: 0 };\nconst hasImage = Boolean($json.messageMeta?.hasImage);\nconst hasFile = Boolean($json.messageMeta?.hasFile);\n\nlet action = 'handoff_humano';\nlet reason = 'sin_conocimiento_suficiente';\nlet missingFields = [];\n\nif ($json.humanRequested) {\n  action = 'handoff_humano';\n  reason = 'solicitud_humano';\n} else if ($json.highRisk) {\n  action = 'handoff_humano';\n  reason = (risk.reasons || []).join(',') || 'riesgo_alto';\n} else if ($json.requestedService === 'urgencia' || $json.softPainRisk) {\n  action = 'handoff_humano';\n  reason = 'urgencia_o_dolor_detectado';\n} else if ($json.audioTranscriptionFailed) {\n  action = 'handoff_humano';\n  reason = 'audio_no_procesado';\n} else if (hasImage || hasFile) {\n  action = 'handoff_humano';\n  reason = hasImage ? 'imagen_recibida' : 'archivo_recibido';\n} else if (intent.appointmentAction && intent.appointmentAction !== 'none') {\n  action = 'dentalink';\n  reason = 'gestion_cita_transaccional';\n} else if (intent.isGreeting) {\n  action = 'responder_info';\n  reason = 'saludo';\n} else if (knowledge.found && knowledge.score >= 0.5) {\n  action = 'responder_info';\n  reason = 'conocimiento_aprobado';\n} else if (intent.primary === 'desconocida' || !knowledge.found) {\n  action = 'pedir_dato_faltante';\n  reason = 'necesita_aclaracion';\n  missingFields = ['servicio o necesidad principal'];\n}\n\nconst advisorAlert =\n  action === 'handoff_humano' ||\n  $json.isHotLead ||\n  ($json.intent?.asksPrice && $json.intent?.asksAvailability);\n\nreturn [{\n  ...$json,\n  missingFields,\n  decision: {\n    action,\n    reason,\n    shouldUseAI: action === 'responder_info',\n    shouldRegister: true,\n    shouldNotifyAdvisor: advisorAlert,\n    confidence: knowledge.level,\n    leadScore: $json.leadScore || 0,\n    leadTemperature: $json.leadTemperature || 'frio',\n    leadSignals: $json.leadSignals || [],\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16800,
+        26928
+      ],
+      "id": "61904c5f-43c0-4ded-86d2-b054e316cfb5",
+      "name": "Decidir accion"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "codex-action-dentalink",
+              "leftValue": "={{ $json.decision.action === 'dentalink' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        17024,
+        26928
+      ],
+      "id": "d0d1ec4c-31f0-42d2-b220-59f50cf176ef",
+      "name": "Accion Dentalink?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "codex-action-info",
+              "leftValue": "={{ $json.decision.action === 'responder_info' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        17472,
+        27168
+      ],
+      "id": "a044ddf7-d86a-4b7a-937c-df79a9c513ef",
+      "name": "Accion responder info?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "codex-action-missing",
+              "leftValue": "={{ $json.decision.action === 'pedir_dato_faltante' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        17696,
+        27312
+      ],
+      "id": "98ef9e37-e3b0-4c90-a31d-ab3de3bde128",
+      "name": "Accion pedir dato faltante?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const missing = $json.missingFields || ['servicio o necesidad principal'];\nconst lang = $json.language?.response || 'es';\nconst isEnglish = lang === 'en';\nconst explicitEnglish = $json.language?.explicit === 'en';\n\nconst fieldLabelsEn = {\n  'servicio o necesidad principal': 'main service or need',\n  'nombre completo': 'full name',\n  'telefono': 'phone number',\n  'servicio': 'service',\n  'fecha preferida': 'preferred date',\n  'franja horaria': 'preferred time range',\n  'telefono o documento del paciente': 'patient phone number or ID',\n  'cita actual': 'current appointment',\n  'nueva fecha preferida': 'new preferred date',\n  'nueva franja horaria': 'new preferred time range',\n  'cita a cancelar': 'appointment to cancel',\n};\nconst label = (field) => isEnglish ? (fieldLabelsEn[field] || field) : field;\n\nlet output = isEnglish\n  ? 'Sure, I can help you with an appointment, treatment information, an estimate, or connecting you with an advisor. What do you need?'\n  : 'Claro, para ayudarte mejor cuentame que necesitas: cita, informacion de un procedimiento, precio aproximado o hablar con un asesor.';\n\nif (explicitEnglish && missing[0] === 'servicio o necesidad principal') {\n  output = 'Of course, I can help you in English. Do you need an appointment, treatment information, an estimate, or an advisor?';\n} else if (missing.length && missing[0] !== 'servicio o necesidad principal') {\n  output = isEnglish\n    ? 'To move forward I need: ' + missing.map(label).join(', ') + '.'\n    : 'Claro, para avanzar necesito: ' + missing.join(', ') + '.';\n}\n\nreturn [{\n  ...$json,\n  output,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18048,
+        27216
+      ],
+      "id": "562024c5-4a49-4a80-9844-b063e25761c5",
+      "name": "Pedir dato faltante"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reason = $json.decision?.reason || ($json.risk?.reasons || []).join(',') || 'handoff';\nconst lang = $json.language?.response || 'es';\nconst isEnglish = lang === 'en';\n\nconst outputByReasonEs = {\n  audio_no_procesado: 'Recibi tu nota de voz pero tuve un problema al procesarla. Te conecto con un asesor para que te atienda.',\n  imagen_recibida: 'Recibi la imagen que mandaste. La paso a un asesor/profesional para que la revise; por seguridad no hago diagnosticos por chat.',\n  archivo_recibido: 'Recibi el archivo que mandaste. Lo paso a un asesor para que lo revise y te ayude.',\n  imagen_o_archivo_recibido: 'Recibi lo que mandaste. Se lo paso a un asesor para que lo revise y te ayude.',\n  urgencia_o_dolor_detectado: 'Entiendo que tienes una molestia. Te conecto enseguida con un asesor.',\n  solicitud_humano: 'Claro, te conecto con un asesor ahora.',\n};\n\nconst outputByReasonEn = {\n  audio_no_procesado: 'I received your voice note, but had trouble processing it. I will connect you with an advisor.',\n  imagen_recibida: 'I received the image you sent. I will pass it to an advisor/professional to review; for safety I do not make diagnoses by chat.',\n  archivo_recibido: 'I received the file you sent. I will pass it to an advisor so they can review it and help you.',\n  imagen_o_archivo_recibido: 'I received what you sent. I will pass it to an advisor so they can review it and help you.',\n  urgencia_o_dolor_detectado: 'I understand you are having discomfort. I will connect you with an advisor right away.',\n  solicitud_humano: 'Sure, I will connect you with an advisor now.',\n};\n\nconst outputByReason = isEnglish ? outputByReasonEn : outputByReasonEs;\nconst output = outputByReason[reason] || (isEnglish\n  ? 'Sure, I will connect you with an advisor so they can help you personally.'\n  : 'Claro, te conecto con un asesor para que te ayude personalmente.');\n\nreturn [{\n  ...$json,\n  handoff: {\n    required: true,\n    reason,\n    suggestedFreshworksActions: [\n      'asignar_conversacion',\n      'agregar_tag_requiere_humano',\n      'crear_nota_interna_con_resumen',\n    ],\n  },\n  output,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18048,
+        27408
+      ],
+      "id": "3e0bc8eb-128e-4787-a996-b0920da81fe1",
+      "name": "Preparar handoff humano"
+    },
+    {
+      "parameters": {
+        "jsCode": "const intent = $json.appointmentIntent || $json.intent?.appointmentAction || 'consultar';\n\nconst dentalinkRoutes = {\n  agendar: { method: 'POST', path: '/appointments' },\n  consultar: { method: 'GET', path: '/appointments' },\n  reprogramar: { method: 'PATCH', path: '/appointments/{appointment_id}' },\n  cancelar: { method: 'DELETE', path: '/appointments/{appointment_id}' },\n};\n\nconst route = dentalinkRoutes[intent] || dentalinkRoutes.consultar;\nconst text = $json.originalText || $json.userText || '';\nconst phoneMatch = text.match(/(?:\\+?57\\s?)?(3\\d{2}[\\s.-]?\\d{3}[\\s.-]?\\d{4})/);\nconst phone = $json.contactInfo?.phone || (phoneMatch ? phoneMatch[0].replace(/[^+\\d]/g, '') : null);\nconst fullName = $json.contactInfo?.fullName || null;\n\nconst missingByIntent = {\n  agendar: ['nombre completo', 'telefono', 'servicio', 'fecha preferida', 'franja horaria'],\n  consultar: ['telefono o documento del paciente'],\n  reprogramar: ['telefono o documento del paciente', 'cita actual', 'nueva fecha preferida', 'nueva franja horaria'],\n  cancelar: ['telefono o documento del paciente', 'cita a cancelar'],\n};\n\nconst detected = {\n  fullName,\n  phone,\n  service: $json.requestedService !== 'desconocido' ? $json.requestedService : null,\n};\n\nlet missingFields = [...(missingByIntent[intent] || [])];\nif (detected.fullName) missingFields = missingFields.filter((field) => field !== 'nombre completo');\nif (detected.phone) missingFields = missingFields.filter((field) => !field.includes('telefono'));\nif (detected.service) missingFields = missingFields.filter((field) => field !== 'servicio');\n\nconst payload = {\n  patient: {\n    full_name: detected.fullName,\n    phone: detected.phone,\n    document: null,\n  },\n  appointment: {\n    service: detected.service,\n    starts_at: null,\n    ends_at: null,\n    notes: text,\n    source: 'freshworks',\n    conversation_id: $json.conversationId,\n  },\n};\n\nreturn [{\n  ...$json,\n  missingFields,\n  dentalink: {\n    intent,\n    method: route.method,\n    path: route.path,\n    payload,\n    detected,\n    missingFields,\n    // Mantener en false hasta tener endpoints, auth, sedes, servicios y mapeo real de Dentalink.\n    readyToCall: false,\n    envNeeded: ['DENTALINK_API_BASE_URL', 'DENTALINK_API_TOKEN'],\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17248,
+        26528
+      ],
+      "id": "783a42ef-553a-4776-95ba-272686ee30b0",
+      "name": "Preparar Dentalink API"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "codex-dentalink-ready-v2",
+              "leftValue": "={{ $json.dentalink.readyToCall }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        17472,
+        26528
+      ],
+      "id": "f7e075a0-c6e6-4f12-b8c4-9144e3bc9175",
+      "name": "Dentalink listo?"
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.dentalink.method }}",
+        "url": "={{ $env.DENTALINK_API_BASE_URL + $json.dentalink.path }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.DENTALINK_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.dentalink.payload) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        17696,
+        26432
+      ],
+      "id": "064cc362-00f6-4be9-9e08-4ac54ad9a7eb",
+      "name": "Dentalink API (placeholder)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = $node['Preparar Dentalink API'].json;\nconst intent = original.dentalink?.intent || 'agendar';\nconst hasError = Boolean($json.error || String($json.message || '').toLowerCase().includes('error'));\nconst isEnglish = (original.language?.response || 'es') === 'en';\n\nconst successByIntentEs = {\n  agendar: 'Listo, deje registrada la solicitud de cita. Un asesor confirmara la disponibilidad.',\n  consultar: 'Listo, consulte la informacion de la cita.',\n  reprogramar: 'Listo, deje registrada la solicitud de reprogramacion. Un asesor confirmara el cambio.',\n  cancelar: 'Listo, deje registrada la solicitud de cancelacion.',\n};\n\nconst successByIntentEn = {\n  agendar: 'Done, I registered the appointment request. An advisor will confirm availability.',\n  consultar: 'Done, I checked the appointment information.',\n  reprogramar: 'Done, I registered the rescheduling request. An advisor will confirm the change.',\n  cancelar: 'Done, I registered the cancellation request.',\n};\n\nconst successByIntent = isEnglish ? successByIntentEn : successByIntentEs;\nconst errorOutput = isEnglish\n  ? 'I had a problem checking Dentalink. I will connect you with an advisor to review it.'\n  : 'Tuve un problema consultando Dentalink. Te conecto con un asesor para revisarlo.';\n\nreturn [{\n  ...original,\n  dentalinkResult: $json,\n  output: hasError ? errorOutput : (successByIntent[intent] || successByIntent.agendar),\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18048,
+        26432
+      ],
+      "id": "ac3373e1-529a-4867-9c1b-4ded0fd291f6",
+      "name": "Formatear respuesta Dentalink"
+    },
+    {
+      "parameters": {
+        "jsCode": "const intent = $json.dentalink?.intent || 'agendar';\nconst missing = $json.dentalink?.missingFields || [];\nconst isEnglish = ($json.language?.response || 'es') === 'en';\n\nconst introByIntentEs = {\n  agendar: 'Perfecto, te ayudo a iniciar la solicitud de cita.',\n  consultar: 'Claro, te ayudo a consultar tu cita.',\n  reprogramar: 'Claro, te ayudo a solicitar la reprogramacion.',\n  cancelar: 'Entiendo, te ayudo a solicitar la cancelacion.',\n};\n\nconst introByIntentEn = {\n  agendar: 'Perfect, I can help start the appointment request.',\n  consultar: 'Sure, I can help check your appointment.',\n  reprogramar: 'Sure, I can help request the reschedule.',\n  cancelar: 'I understand, I can help request the cancellation.',\n};\n\nconst fieldLabelsEn = {\n  'nombre completo': 'full name',\n  'telefono': 'phone number',\n  'servicio': 'service',\n  'fecha preferida': 'preferred date',\n  'franja horaria': 'preferred time range',\n  'telefono o documento del paciente': 'patient phone number or ID',\n  'cita actual': 'current appointment',\n  'nueva fecha preferida': 'new preferred date',\n  'nueva franja horaria': 'new preferred time range',\n  'cita a cancelar': 'appointment to cancel',\n};\nconst label = (field) => isEnglish ? (fieldLabelsEn[field] || field) : field;\nconst introByIntent = isEnglish ? introByIntentEn : introByIntentEs;\n\nconst detail = missing.length\n  ? (isEnglish ? ' To do that I need: ' + missing.map(label).join(', ') + '.' : ' Para hacerlo necesito: ' + missing.join(', ') + '.')\n  : (isEnglish ? ' I have the main details; an advisor will confirm the information.' : ' Ya tengo los datos principales; un asesor confirmara la informacion.');\n\nreturn [{\n  ...$json,\n  output: (introByIntent[intent] || introByIntent.agendar) + detail,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18048,
+        26624
+      ],
+      "id": "c756944a-f031-4f09-b235-fe88cea21408",
+      "name": "Respuesta cita sin API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fallback = ($json.language?.response || 'es') === 'en'\n  ? 'Hi, I am CiruNova. How can I help you?'\n  : 'Hola, soy CiruNova. En que te ayudo?';\nconst output = $json.output || $json.text || $json.response?.text || $json.message || fallback;\nconst now = new Date();\nconst timestampLocal = new Intl.DateTimeFormat('sv-SE', {\n  timeZone: 'America/Bogota',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n  hour: '2-digit',\n  minute: '2-digit',\n  second: '2-digit',\n  hour12: false,\n}).format(now);\n\nconst auditLog = {\n  timestamp: timestampLocal,\n  timestampUtc: now.toISOString(),\n  timezone: 'America/Bogota',\n  conversationId: $json.conversationId,\n  userId: $json.userId,\n  messageId: $json.messageId || '',\n  duplicateKey: $json.duplicateKey || '',\n  action: $json.decision?.action || ($json.dentalink ? 'dentalink' : 'respuesta'),\n  reason: $json.decision?.reason || null,\n  intent: $json.intent || null,\n  requestedService: $json.requestedService || null,\n  serviceResolvedFromMemory: Boolean($json.serviceResolvedFromMemory),\n  language: $json.language || null,\n  messageMeta: $json.messageMeta || null,\n  risk: $json.risk || null,\n  knowledgeConfidence: $json.knowledgeConfidence || null,\n  knowledgeIds: ($json.knowledgeCandidates || []).map((item) => item.id),\n  dentalinkIntent: $json.dentalink?.intent || null,\n  handoffRequired: Boolean($json.handoff?.required),\n  leadScore: $json.leadScore || 0,\n  leadTemperature: $json.leadTemperature || 'frio',\n  leadSignals: $json.leadSignals || [],\n  contactInfo: $json.contactInfo || {},\n};\n\nconst sheetRow = {\n  timestamp: auditLog.timestamp,\n  conversation_id: auditLog.conversationId || '',\n  user_id: auditLog.userId || '',\n  action: auditLog.action || '',\n  reason: auditLog.reason || '',\n  primary_intent: auditLog.intent?.primary || '',\n  appointment_action: auditLog.intent?.appointmentAction || '',\n  requested_service: auditLog.requestedService || '',\n  risk_level: auditLog.risk?.level || '',\n  risk_reasons: (auditLog.risk?.reasons || []).join(', '),\n  knowledge_confidence_level: auditLog.knowledgeConfidence?.level || '',\n  knowledge_confidence_score: auditLog.knowledgeConfidence?.score ?? '',\n  knowledge_ids: auditLog.knowledgeIds.join(', '),\n  dentalink_intent: auditLog.dentalinkIntent || '',\n  handoff_required: auditLog.handoffRequired,\n  lead_score: auditLog.leadScore,\n  original_text: $json.originalText || $json.userText || '',\n  output,\n};\n\nreturn [{\n  ...$json,\n  output,\n  auditLog,\n  sheetRow,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18384,
+        26928
+      ],
+      "id": "3ca99524-fadf-47be-8f59-9703de416b2a",
+      "name": "Registrar resultado"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify({\n  mensaje: $json.userText,\n  idioma_respuesta: $json.language?.response || 'es',\n  idioma_detectado: $json.language?.detected || '',\n  idioma_fuente: $json.language?.source || 'default',\n  intencion: $json.intent?.primary || 'desconocida',\n  servicio: $json.requestedService || 'desconocido',\n  servicio_recordado: Boolean($json.serviceResolvedFromMemory),\n  accion_decidida: $json.decision?.action || 'responder_info',\n  conocimiento_aprobado: ($json.knowledgeCandidates || []).map(c => ({\n    tema: c.id,\n    referencia: c.text\n  })),\n  confianza: $json.knowledgeConfidence?.level || 'baja',\n  datos_faltantes: $json.missingFields || []\n}) }}",
+        "options": {
+          "systemMessage": "REGLA CRITICA DE IDIOMA\nRecibiras un JSON con el campo \"idioma_respuesta\". Si es \"en\", responde solo en ingles. Si es \"es\", responde solo en espanol. Traduce naturalmente el conocimiento aprobado cuando haga falta y no mezcles idiomas, salvo nombres propios, direccion o telefonos.\n\nEres CiruNova, asesora virtual de Cirumax, clinica odontologica y de estetica facial en Pereira.\nFecha: {{ $now.setZone('America/Bogota').toFormat('dd/MM/yyyy HH:mm') }} (America/Bogota).\n\nTU PERSONALIDAD\n\nHablas como una asesora real de la clinica: cercana, segura y profesional. Tu tono es calido, claro y natural, como WhatsApp con un paciente. No suenes robotica. No uses respuestas frias como \"recibi lo que mandaste\". No uses \"asesor/profesional\" con slash. Di \"equipo clinico\" cuando hables de revision medica, y \"asesor\" cuando hables del siguiente paso comercial o de agenda.\n\nNo uses emojis excesivos. No digas \"¡Con mucho gusto!\" ni \"¡Claro que si!\" como muletilla. Puedes decir \"Gracias\", \"Dale\", \"Perfecto\" o \"Te cuento\" cuando sea natural.\n\nCÓMO USAR EL CONOCIMIENTO APROBADO\n\nRecibiras un JSON con campo \"conocimiento_aprobado\". Esos son datos de referencia, no guiones para copiar.\n\nTu trabajo es:\n1. Leer los datos de referencia.\n2. Responder con tus propias palabras usando esos datos como base.\n3. Adaptar el tono al contexto: si preguntan precio, orienta hacia valoracion; si preguntan info, educa y genera interes; si mandan imagen clinica, conecta con revision del equipo clinico.\n\nPROHIBIDO:\n- Copiar literalmente el conocimiento aprobado.\n- Inventar precios, diagnosticos, garantias, tiempos exactos o disponibilidad.\n- Interpretar radiografias, fotos intraorales, examenes o imagenes clinicas.\n- Decir que ves caries, hueso, implantes, infecciones, fracturas, problemas o hallazgos especificos en una imagen.\n- Terminar con \"¿Tienes alguna otra pregunta?\" o \"¿Deseas saber algo mas?\".\n\nIMAGENES, RADIOGRAFIAS Y ARCHIVOS CLINICOS\n\nSi el paciente envia una radiografia, foto de sonrisa, foto intraoral, examen o archivo clinico:\n- Agradece y confirma que lo recibiste.\n- Menciona el contexto si esta disponible, por ejemplo \"diseno de sonrisa\", \"implantes\", \"ortodoncia\" o el servicio recordado.\n- Explica de forma amable que por chat no se hacen diagnosticos.\n- Indica que debe revisarlo el equipo clinico en una valoracion.\n- Cierra conectando con un asesor o con el siguiente paso.\n- No hagas preguntas adicionales salvo que sea indispensable.\n- No digas \"no puedo ayudarte\"; haz que suene como avance del proceso.\n\nEjemplo ideal en espanol:\n\"Gracias, ya recibi tu radiografia. Para orientarte bien sobre diseno de sonrisa, es importante que la revise el equipo clinico en una valoracion, porque por chat no hacemos diagnosticos. Te conecto con un asesor para ayudarte con el siguiente paso.\"\n\nEjemplo ideal en ingles:\n\"Thank you, I received your X-ray. To guide you properly about your smile design, our clinical team needs to review it during an evaluation, because we do not make diagnoses by chat. I will connect you with an advisor to help you with the next step.\"\n\nREGLAS DE CONTENIDO\n\n- Solo responde con informacion que este en el conocimiento aprobado o que sea sentido comun operativo de la clinica.\n- Si preguntan por ubicacion: responde solo con lo que diga el conocimiento aprobado.\n- Si preguntan por horario: responde solo con lo que diga el conocimiento aprobado.\n- Si preguntan por telefono: responde solo con lo que diga el conocimiento aprobado.\n- Nunca respondas que la ubicacion fisica es \"America/Bogota\" o \"UTC-5\"; eso es solo la zona horaria del sistema.\n- Si la confianza del conocimiento es baja o no hay candidatos relevantes, no improvises. Pide una aclaracion concreta.\n\nREGLAS DE FLUJO\n\n- Citas: no confirmas disponibilidad final. Pide los datos que falten y di que un asesor revisa disponibilidad.\n- Riesgo alto, dolor fuerte, sangrado, infeccion, fiebre o solicitud de humano: conecta con asesor sin dar vueltas.\n- Maximo una pregunta por respuesta.\n- Respuestas de 2 a 4 frases.\n- Obedece siempre el campo \"idioma_respuesta\". Si dice \"en\", responde en ingles. Si dice \"es\", responde en espanol.\n\nSALUDO\n\nSi el mensaje es solo un saludo, responde algo como:\n\"Hola, soy CiruNova de Cirumax. ¿En que te puedo ayudar? Puedo orientarte con citas, informacion de tratamientos o conectarte con un asesor.\"\n\nNo uses menu numerado.\n\nESTRATEGIA COMERCIAL\n\nTu objetivo es llevar cada conversacion al siguiente paso natural:\n- Si preguntan precio, explica que depende del caso y lleva a valoracion.\n- Si preguntan informacion, orienta y cierra con una accion concreta.\n- Si ya muestran interes, facilita el proceso.\n- Si mandan imagen clinica, conviertelo en avance hacia valoracion o asesor, sin diagnosticar.\n\nTermina siempre con el siguiente paso concreto."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        17984,
+        26816
+      ],
+      "id": "7cc448f2-4f6d-49a7-90c9-a645c797cb21",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "llama-3.3-70b-versatile"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        17920,
+        27040
+      ],
+      "id": "1f13b191-3703-4856-a848-9d893dcc3777",
+      "name": "Groq LLM"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.sessionId }}",
+        "contextWindowLength": 12
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        18048,
+        27040
+      ],
+      "id": "75d45064-e9cb-4ca9-a7cd-e277c558fb51",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dateTimeTool",
+      "typeVersion": 2,
+      "position": [
+        18176,
+        27040
+      ],
+      "id": "5e3874e2-9f65-4be9-a0c8-10560360dacd",
+      "name": "Date & Time"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://YOUR-ACCOUNT.freshchat.com/v2/conversations/{{ $node['Extraer mensaje'].json.conversationId }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + 'eyJraWQiOiJjdXN0b20tb2F1dGgta2V5aWQiLCJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJmcmVzaGNoYXQiLCJhdWQiOiJmcmVzaGNoYXQiLCJpYXQiOjE3NzgxNjU4MTcsInNjb3BlIjoiYWdlbnQ6cmVhZCBhZ2VudDpjcmVhdGUgYWdlbnQ6dXBkYXRlIGFnZW50OmRlbGV0ZSBjb252ZXJzYXRpb246Y3JlYXRlIGNvbnZlcnNhdGlvbjpyZWFkIGNvbnZlcnNhdGlvbjp1cGRhdGUgbWVzc2FnZTpjcmVhdGUgbWVzc2FnZTpnZXQgYmlsbGluZzp1cGRhdGUgcmVwb3J0czpmZXRjaCByZXBvcnRzOmV4dHJhY3QgcmVwb3J0czpyZWFkIHJlcG9ydHM6ZXh0cmFjdDpyZWFkIGFjY291bnQ6cmVhZCBkYXNoYm9hcmQ6cmVhZCB1c2VyOnJlYWQgdXNlcjpjcmVhdGUgdXNlcjp1cGRhdGUgdXNlcjpkZWxldGUgb3V0Ym91bmRtZXNzYWdlOnNlbmQgb3V0Ym91bmRtZXNzYWdlOmdldCBtZXNzYWdpbmctY2hhbm5lbHM6bWVzc2FnZTpzZW5kIG1lc3NhZ2luZy1jaGFubmVsczptZXNzYWdlOmdldCBtZXNzYWdpbmctY2hhbm5lbHM6dGVtcGxhdGU6Y3JlYXRlIG1lc3NhZ2luZy1jaGFubmVsczp0ZW1wbGF0ZTpnZXQgZmlsdGVyaW5ib3g6cmVhZCBmaWx0ZXJpbmJveDpjb3VudDpyZWFkIHJvbGU6cmVhZCBpbWFnZTp1cGxvYWQiLCJ0eXAiOiJCZWFyZXIiLCJjbGllbnRJZCI6ImZjLWQ5MDgzY2JlLTlkYmUtNDM3ZC1iOTA2LTlmZTMzZjE4ZTE1ZSIsInN1YiI6ImMxOTJmOTIwLThmMTQtNDlkYi05MThiLTczZDBhOWU0MWQyOSIsImp0aSI6IjQ0Y2UxZmY5LTllN2MtNDgxYy1iZmU2LWY5MWIyMGNmYjBiYyIsImV4cCI6MjA5Mzc4NTAxN30.4UOxzKvysl3KbEKfvM0UN5LQ0-lSu6baK4N7DoKB16g' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "ASSUME-IDENTITY",
+              "value": "false"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  message_parts: [\n    {\n      text: {\n        content: $json.output || $node['Registrar resultado'].json.output || 'Hola, soy CiruNova. En que te ayudo?'\n      }\n    }\n  ],\n  message_type: 'normal',\n  actor_type: 'bot',\n  user_id: $json.userId || $node['Extraer mensaje'].json.userId\n}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        18608,
+        26928
+      ],
+      "id": "8468ebbf-a73d-40ab-99a5-1dd84f3af693",
+      "name": "Responder en Freshworks",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Registros",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.sheetRow.timestamp }}",
+            "action": "={{ $json.sheetRow.action }}",
+            "reason": "={{ $json.sheetRow.reason }}",
+            "risk_level": "={{ $json.sheetRow.risk_level }}",
+            "user_id": "={{ $json.sheetRow.user_id }}",
+            "conversation_id": "={{ $json.sheetRow.conversation_id }}",
+            "primary_intent": "={{ $json.sheetRow.primary_intent }}",
+            "appointment_action": "={{ $json.sheetRow.appointment_action }}",
+            "requested_service": "={{ $json.sheetRow.requested_service }}",
+            "risk_reasons": "={{ $json.sheetRow.risk_reasons }}",
+            "knowledge_confidence_level": "={{ $json.sheetRow.knowledge_confidence_level }}",
+            "knowledge_confidence_score": "={{ $json.sheetRow.knowledge_confidence_score }}",
+            "knowledge_ids": "={{ $json.sheetRow.knowledge_ids }}",
+            "dentalink_intent": "={{ $json.sheetRow.dentalink_intent }}",
+            "handoff_required": "={{ $json.sheetRow.handoff_required }}",
+            "lead_score": "={{ $json.sheetRow.lead_score }}",
+            "original_text": "={{ $json.sheetRow.original_text }}",
+            "output": "={{ $json.sheetRow.output }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversation_id",
+              "displayName": "conversation_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "primary_intent",
+              "displayName": "primary_intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appointment_action",
+              "displayName": "appointment_action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "requested_service",
+              "displayName": "requested_service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "risk_level",
+              "displayName": "risk_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "risk_reasons",
+              "displayName": "risk_reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "knowledge_confidence_level",
+              "displayName": "knowledge_confidence_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "knowledge_confidence_score",
+              "displayName": "knowledge_confidence_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "knowledge_ids",
+              "displayName": "knowledge_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dentalink_intent",
+              "displayName": "dentalink_intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "handoff_required",
+              "displayName": "handoff_required",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "original_text",
+              "displayName": "original_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "output",
+              "displayName": "output",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        18608,
+        26736
+      ],
+      "id": "24f09a47-a71b-410b-bcc4-234e8cdecd4b",
+      "name": "Guardar registro en Sheet",
+      "onError": "continueRegularOutput",
+      "notes": "Rama lateral de auditoria. Si Google Sheets falla, no bloquea la respuesta en Freshworks."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplicación con staticData (persiste entre ejecuciones en n8n)\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.seenKeys) staticData.seenKeys = {};\n\nconst key = $json.duplicateKey || '';\nconst now = Date.now();\n\n// Limpiar keys más viejas de 10 minutos para no crecer sin límite\nconst TEN_MINUTES = 10 * 60 * 1000;\nfor (const k of Object.keys(staticData.seenKeys)) {\n  if (now - staticData.seenKeys[k] > TEN_MINUTES) {\n    delete staticData.seenKeys[k];\n  }\n}\n\nlet isDuplicate = false;\nif (key && staticData.seenKeys[key]) {\n  isDuplicate = true;\n}\n\nif (key && !isDuplicate) {\n  staticData.seenKeys[key] = now;\n}\n\nreturn [{\n  ...$json,\n  isDuplicate,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14336,
+        26928
+      ],
+      "id": "88d69121-b445-49ce-8f7f-ad66ea36a915",
+      "name": "Evitar duplicados"
+    },
+    {
+      "parameters": {
+        "jsCode": "const decision = $json.decision || {};\nconst risk = $json.risk || {};\nconst contact = $json.contactInfo || {};\nconst media = $json.messageMeta || {};\nconst shouldNotify =\n  Boolean(decision.shouldNotifyAdvisor) ||\n  Boolean($json.handoff?.required) ||\n  $json.isHotLead === true;\n\nconst tag =\n  $json.handoff?.required ? 'requiere_asesor' :\n  $json.isHotLead ? 'lead_caliente' :\n  risk.level === 'alto' ? 'riesgo_alto' :\n  'seguimiento_bot';\n\nconst priority =\n  risk.level === 'alto' ? 'Urgent' :\n  $json.isHotLead ? 'High' :\n  $json.leadTemperature === 'tibio' ? 'Medium' :\n  'Low';\n\nconst summary = [\n  'CiruNova: ' + tag,\n  'Accion: ' + (decision.action || 'respuesta'),\n  'Motivo: ' + (decision.reason || ''),\n  'Idioma respuesta: ' + ($json.language?.response || 'es'),\n  'Servicio: ' + ($json.requestedService || 'desconocido') + ($json.serviceResolvedFromMemory ? ' (recordado)' : ''),\n  'Lead: ' + ($json.leadTemperature || 'frio') + ' (' + ($json.leadScore || 0) + ')',\n  'Senales: ' + (($json.leadSignals || []).join(', ') || 'ninguna'),\n  media.hasMedia ? 'Medio recibido: ' + (media.mediaKind || 'archivo') : null,\n  media.imageFileUrl ? 'Imagen URL: ' + media.imageFileUrl : null,\n  media.fileUrl ? 'Archivo URL: ' + media.fileUrl : null,\n  contact.fullName ? 'Nombre: ' + contact.fullName : null,\n  contact.phone ? 'Telefono: ' + contact.phone : null,\n  'Mensaje: ' + ($json.originalText || $json.userText || ''),\n].filter(Boolean).join('\\n');\n\nreturn [{\n  ...$json,\n  freshworksAdvisor: {\n    shouldNotify,\n    tag,\n    priority,\n    privateNote: summary,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18608,
+        27120
+      ],
+      "id": "1280d57b-fe60-4cbe-ad00-23754a48f2b9",
+      "name": "Preparar alerta asesor"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "codex-should-notify-advisor",
+              "leftValue": "={{ $json.freshworksAdvisor.shouldNotify }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        18832,
+        27120
+      ],
+      "id": "d3a1ef5a-26de-4f2d-a5f5-65a6fe72196e",
+      "name": "Debe notificar asesor?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://YOUR-ACCOUNT.freshchat.com/v2/conversations/{{ $json.conversationId || $node['Extraer mensaje'].json.conversationId }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.FRESHWORKS_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "ASSUME-IDENTITY",
+              "value": "false"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  message_parts: [\n    {\n      text: {\n        content: $json.freshworksAdvisor.privateNote\n      }\n    }\n  ],\n  message_type: 'private',\n  actor_type: 'bot',\n  user_id: $json.userId || $node['Extraer mensaje'].json.userId\n}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        19056,
+        27024
+      ],
+      "id": "a37d12be-a9a5-4ba3-9087-cc46e8073443",
+      "name": "Crear nota interna Freshworks",
+      "onError": "continueRegularOutput",
+      "notes": "Crea un mensaje privado para que el asesor vea el contexto. Usa el mismo token Freshchat del nodo Responder en Freshworks."
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://YOUR-ACCOUNT.freshchat.com/v2/conversations/{{ $json.conversationId || $node['Extraer mensaje'].json.conversationId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.FRESHWORKS_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  properties: {\n    priority: $json.freshworksAdvisor.priority\n  }\n}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        19056,
+        27216
+      ],
+      "id": "63188538-f13a-45e4-abbf-8385e9b54b80",
+      "name": "Marcar prioridad Freshworks",
+      "onError": "continueRegularOutput",
+      "notes": "Actualiza priority si tu cuenta soporta conversation properties. Si falla, no bloquea el flujo."
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Conocimiento",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        16352,
+        26928
+      ],
+      "id": "d27781ad-fc09-42e7-b0fa-d900857cee6b",
+      "name": "Leer base conocimiento Sheet (opcional)",
+      "onError": "continueRegularOutput",
+      "notes": "Lee la pestana Conocimiento. Si falla o no hay filas activas, Buscar conocimiento aprobado usa la base interna de respaldo."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "audio-detect-condition",
+              "leftValue": "={{ $json.hasAudio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        14800,
+        26912
+      ],
+      "id": "4cb1f0eb-eda6-4c1d-b496-2515e6e93a23",
+      "name": "Es mensaje de audio?"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.audioFileUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.FRESHWORKS_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        14992,
+        26784
+      ],
+      "id": "be5da30b-e9f5-4a4d-8897-b547efebb012",
+      "name": "Descargar audio Freshworks",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3"
+            },
+            {
+              "name": "language",
+              "value": "es"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        15216,
+        26784
+      ],
+      "id": "815d5df2-9469-483b-9961-91bcf403dd72",
+      "name": "Transcribir audio Groq",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const transcription = ($json.text || $json.transcription || $json.response || '').trim();\nconst original = $('Es mensaje de audio?').item.json;\n\nif (!transcription || $json.error) {\n  return [{\n    ...original,\n    userText: '[audio no procesado]',\n    transcribedFromAudio: false,\n    audioTranscriptionFailed: true,\n  }];\n}\n\nreturn [{\n  ...original,\n  userText: transcription,\n  originalText: transcription,\n  transcribedFromAudio: true,\n  audioTranscriptionFailed: false,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15440,
+        26784
+      ],
+      "id": "8ee6dad1-aa2d-4cbd-b992-512bfbdb3203",
+      "name": "Reemplazar texto con transcripcion"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Freshworks Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extraer mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer mensaje": {
+      "main": [
+        [
+          {
+            "node": "Evitar duplicados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es mensaje de usuario?": {
+      "main": [
+        [
+          {
+            "node": "Es mensaje de audio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es mensaje de audio?": {
+      "main": [
+        [
+          {
+            "node": "Descargar audio Freshworks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalizar mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar audio Freshworks": {
+      "main": [
+        [
+          {
+            "node": "Transcribir audio Groq",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribir audio Groq": {
+      "main": [
+        [
+          {
+            "node": "Reemplazar texto con transcripcion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reemplazar texto con transcripcion": {
+      "main": [
+        [
+          {
+            "node": "Normalizar mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar mensaje": {
+      "main": [
+        [
+          {
+            "node": "Detectar intencion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar intencion": {
+      "main": [
+        [
+          {
+            "node": "Detectar riesgo/humano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar riesgo/humano": {
+      "main": [
+        [
+          {
+            "node": "Leer base conocimiento Sheet (opcional)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar conocimiento aprobado": {
+      "main": [
+        [
+          {
+            "node": "Decidir accion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir accion": {
+      "main": [
+        [
+          {
+            "node": "Accion Dentalink?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accion Dentalink?": {
+      "main": [
+        [
+          {
+            "node": "Preparar Dentalink API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Accion responder info?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Dentalink API": {
+      "main": [
+        [
+          {
+            "node": "Dentalink listo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dentalink listo?": {
+      "main": [
+        [
+          {
+            "node": "Dentalink API (placeholder)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta cita sin API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dentalink API (placeholder)": {
+      "main": [
+        [
+          {
+            "node": "Formatear respuesta Dentalink",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear respuesta Dentalink": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta cita sin API": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accion responder info?": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Accion pedir dato faltante?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accion pedir dato faltante?": {
+      "main": [
+        [
+          {
+            "node": "Pedir dato faltante",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar handoff humano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir dato faltante": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar handoff humano": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar resultado": {
+      "main": [
+        [
+          {
+            "node": "Responder en Freshworks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Guardar registro en Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Preparar alerta asesor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date & Time": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evitar duplicados": {
+      "main": [
+        [
+          {
+            "node": "Es mensaje de usuario?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar alerta asesor": {
+      "main": [
+        [
+          {
+            "node": "Debe notificar asesor?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Debe notificar asesor?": {
+      "main": [
+        [
+          {
+            "node": "Crear nota interna Freshworks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Marcar prioridad Freshworks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer base conocimiento Sheet (opcional)": {
+      "main": [
+        [
+          {
+            "node": "Buscar conocimiento aprobado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "tags": []
+}
